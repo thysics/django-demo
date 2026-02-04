@@ -1088,7 +1088,7 @@ class ExceptionReporterTests(SimpleTestCase):
         )
 
     def test_unprintable_values_handling(self):
-        "Unprintable values should not make the output generation choke."
+        """Unprintable values should not make the output generation choke."""
         try:
 
             class OomOutput:
@@ -1101,12 +1101,14 @@ class ExceptionReporterTests(SimpleTestCase):
             exc_type, exc_value, tb = sys.exc_info()
         reporter = ExceptionReporter(None, exc_type, exc_value, tb)
         html = reporter.get_traceback_html()
-        self.assertIn('<td class="code"><pre>Error in formatting', html)
+        # reprlib gracefully handles exceptions in __repr__ by returning a
+        # fallback representation like "<ClassName instance at 0x...>"
+        self.assertIn("OomOutput", html)
+        self.assertIn("instance at", html)
 
     def test_too_large_values_handling(self):
-        "Large values should not create a large HTML."
+        """Large values should not create a large HTML."""
         large = 256 * 1024
-        repr_of_str_adds = len(repr(""))
         try:
 
             class LargeOutput:
@@ -1119,10 +1121,24 @@ class ExceptionReporterTests(SimpleTestCase):
             exc_type, exc_value, tb = sys.exc_info()
         reporter = ExceptionReporter(None, exc_type, exc_value, tb)
         html = reporter.get_traceback_html()
+        # With reprlib, the output is truncated early, keeping HTML small
         self.assertEqual(len(html) // 1024 // 128, 0)  # still fit in 128Kb
-        self.assertIn(
-            "&lt;trimmed %d bytes string&gt;" % (large + repr_of_str_adds,), html
-        )
+        # reprlib truncates with "..." instead of the old "<trimmed>" message
+        self.assertIn("...", html)
+
+    def test_large_variable_in_scope_performance(self):
+        """Large variables should not cause memory exhaustion during formatting."""
+        try:
+            # Simulate a large variable in scope (e.g., 40MB of data)
+            large_data = list(range(10 * 1024 * 1024))  # 10M element list
+            raise ValueError()
+        except Exception:
+            exc_type, exc_value, tb = sys.exc_info()
+        reporter = ExceptionReporter(None, exc_type, exc_value, tb)
+        # This should complete quickly without memory issues
+        html = reporter.get_traceback_html()
+        # The output should be reasonably sized (reprlib limits the representation)
+        self.assertLess(len(html), 256 * 1024)  # Less than 256KB
 
     def test_encoding_error(self):
         """
