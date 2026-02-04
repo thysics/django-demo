@@ -169,6 +169,148 @@ class UserModelChecksTests(SimpleTestCase):
             errors = checks.run_checks(app_configs=self.apps.get_app_configs())
             self.assertEqual(errors, [])
 
+    @override_settings(AUTH_USER_MODEL="auth_tests.CustomUserHashExclusionConstraint")
+    def test_username_unique_with_hash_exclusion_constraint(self):
+        """
+        A hash exclusion constraint with EQUAL operator is considered unique.
+        """
+        try:
+            from django.contrib.postgres.constraints import ExclusionConstraint
+            from django.contrib.postgres.fields import RangeOperators
+        except ImportError:
+            self.skipTest("PostgreSQL support not available")
+
+        class CustomUserHashExclusionConstraint(AbstractBaseUser):
+            username = models.CharField(max_length=30)
+            USERNAME_FIELD = "username"
+
+            class Meta:
+                constraints = [
+                    ExclusionConstraint(
+                        name="username_unique_hash",
+                        expressions=[("username", RangeOperators.EQUAL)],
+                        index_type="hash",
+                    ),
+                ]
+
+        self.assertEqual(checks.run_checks(app_configs=self.apps.get_app_configs()), [])
+        with self.settings(AUTHENTICATION_BACKENDS=["my.custom.backend"]):
+            errors = checks.run_checks(app_configs=self.apps.get_app_configs())
+            self.assertEqual(errors, [])
+
+    @override_settings(
+        AUTH_USER_MODEL="auth_tests.CustomUserHashExclusionConstraintWithF"
+    )
+    def test_username_unique_with_hash_exclusion_constraint_f_expression(self):
+        """
+        A hash exclusion constraint with F expression and EQUAL operator
+        is considered unique.
+        """
+        try:
+            from django.contrib.postgres.constraints import ExclusionConstraint
+            from django.contrib.postgres.fields import RangeOperators
+        except ImportError:
+            self.skipTest("PostgreSQL support not available")
+
+        from django.db.models import F
+
+        class CustomUserHashExclusionConstraintWithF(AbstractBaseUser):
+            username = models.CharField(max_length=30)
+            USERNAME_FIELD = "username"
+
+            class Meta:
+                constraints = [
+                    ExclusionConstraint(
+                        name="username_unique_hash_f",
+                        expressions=[(F("username"), RangeOperators.EQUAL)],
+                        index_type="hash",
+                    ),
+                ]
+
+        self.assertEqual(checks.run_checks(app_configs=self.apps.get_app_configs()), [])
+        with self.settings(AUTHENTICATION_BACKENDS=["my.custom.backend"]):
+            errors = checks.run_checks(app_configs=self.apps.get_app_configs())
+            self.assertEqual(errors, [])
+
+    @override_settings(AUTH_USER_MODEL="auth_tests.CustomUserGistExclusionConstraint")
+    def test_username_not_unique_with_gist_exclusion_constraint(self):
+        """
+        A GiST exclusion constraint is NOT considered unique (only hash is).
+        """
+        try:
+            from django.contrib.postgres.constraints import ExclusionConstraint
+            from django.contrib.postgres.fields import RangeOperators
+        except ImportError:
+            self.skipTest("PostgreSQL support not available")
+
+        class CustomUserGistExclusionConstraint(AbstractBaseUser):
+            username = models.CharField(max_length=30)
+            USERNAME_FIELD = "username"
+
+            class Meta:
+                constraints = [
+                    ExclusionConstraint(
+                        name="username_exclusion_gist",
+                        expressions=[("username", RangeOperators.EQUAL)],
+                        # GiST is the default, not hash
+                    ),
+                ]
+
+        errors = checks.run_checks(app_configs=self.apps.get_app_configs())
+        self.assertEqual(
+            errors,
+            [
+                checks.Error(
+                    "'CustomUserGistExclusionConstraint.username' must be "
+                    "unique because it is named as the 'USERNAME_FIELD'.",
+                    obj=CustomUserGistExclusionConstraint,
+                    id="auth.E003",
+                ),
+            ],
+        )
+
+    @override_settings(
+        AUTH_USER_MODEL="auth_tests.CustomUserHashExclusionConstraintWithCondition"
+    )
+    def test_username_not_unique_with_conditional_hash_exclusion_constraint(self):
+        """
+        A hash exclusion constraint with a condition is NOT considered
+        totally unique.
+        """
+        try:
+            from django.contrib.postgres.constraints import ExclusionConstraint
+            from django.contrib.postgres.fields import RangeOperators
+        except ImportError:
+            self.skipTest("PostgreSQL support not available")
+
+        class CustomUserHashExclusionConstraintWithCondition(AbstractBaseUser):
+            username = models.CharField(max_length=30)
+            is_active = models.BooleanField(default=True)
+            USERNAME_FIELD = "username"
+
+            class Meta:
+                constraints = [
+                    ExclusionConstraint(
+                        name="username_unique_hash_conditional",
+                        expressions=[("username", RangeOperators.EQUAL)],
+                        index_type="hash",
+                        condition=Q(is_active=True),
+                    ),
+                ]
+
+        errors = checks.run_checks(app_configs=self.apps.get_app_configs())
+        self.assertEqual(
+            errors,
+            [
+                checks.Error(
+                    "'CustomUserHashExclusionConstraintWithCondition.username' must be "
+                    "unique because it is named as the 'USERNAME_FIELD'.",
+                    obj=CustomUserHashExclusionConstraintWithCondition,
+                    id="auth.E003",
+                ),
+            ],
+        )
+
     @override_settings(AUTH_USER_MODEL="auth_tests.BadUser")
     def test_is_anonymous_authenticated_methods(self):
         """
