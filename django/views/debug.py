@@ -2,6 +2,7 @@ import functools
 import inspect
 import itertools
 import re
+import reprlib
 import sys
 import types
 import warnings
@@ -10,7 +11,6 @@ from pathlib import Path
 from django.conf import settings
 from django.http import Http404, HttpResponse, HttpResponseNotFound
 from django.template import Context, Engine, TemplateDoesNotExist
-from django.template.defaultfilters import pprint
 from django.urls import URLResolver, resolve
 from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
@@ -29,6 +29,32 @@ DEBUG_ENGINE = Engine(
     debug=True,
     libraries={"i18n": "django.templatetags.i18n"},
 )
+
+# Configure a size-limited repr for formatting frame variables.
+# This avoids memory exhaustion when formatting large objects.
+_exception_reporter_repr = reprlib.Repr()
+_exception_reporter_repr.maxlist = 100
+_exception_reporter_repr.maxset = 100
+_exception_reporter_repr.maxfrozenset = 100
+_exception_reporter_repr.maxtuple = 100
+_exception_reporter_repr.maxdict = 100
+_exception_reporter_repr.maxstring = 300
+_exception_reporter_repr.maxother = 300
+_exception_reporter_repr.maxlevel = 5
+
+
+def _safe_repr(value):
+    """
+    Return a size-limited representation of value.
+
+    This function uses reprlib to generate a truncated representation of
+    large objects, avoiding memory exhaustion when formatting exception
+    traceback frames containing large variables.
+    """
+    try:
+        return _exception_reporter_repr.repr(value)
+    except Exception as e:
+        return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 
 
 def builtin_template_path(name):
@@ -357,10 +383,7 @@ class ExceptionReporter:
             if "vars" in frame:
                 frame_vars = []
                 for k, v in frame["vars"]:
-                    v = pprint(v)
-                    # Trim large blobs of data
-                    if len(v) > 4096:
-                        v = "%s… <trimmed %d bytes string>" % (v[0:4096], len(v))
+                    v = _safe_repr(v)
                     frame_vars.append((k, v))
                 frame["vars"] = frame_vars
             frames[i] = frame
