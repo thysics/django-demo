@@ -499,6 +499,38 @@ class ExclusionConstraintTests(PostgreSQLTestCase):
             "violation_error_code='room_must_be_unique'>",
         )
 
+    def test_fields_property(self):
+        # Hash index with single EQUAL expression returns field tuple.
+        constraint = ExclusionConstraint(
+            name="hash_equal_str",
+            index_type="hash",
+            expressions=[("room", RangeOperators.EQUAL)],
+        )
+        self.assertEqual(constraint.fields, ("room",))
+        # Hash index with single EQUAL expression using F object.
+        constraint = ExclusionConstraint(
+            name="hash_equal_f",
+            index_type="hash",
+            expressions=[(F("room"), RangeOperators.EQUAL)],
+        )
+        self.assertEqual(constraint.fields, ("room",))
+        # GIST index returns empty tuple.
+        constraint = ExclusionConstraint(
+            name="gist_overlaps",
+            index_type="GIST",
+            expressions=[(F("datespan"), RangeOperators.OVERLAPS)],
+        )
+        self.assertEqual(constraint.fields, ())
+        # Multiple expressions return empty tuple.
+        constraint = ExclusionConstraint(
+            name="gist_overlaps_equal",
+            expressions=[
+                (F("datespan"), RangeOperators.OVERLAPS),
+                (F("room"), RangeOperators.EQUAL),
+            ],
+        )
+        self.assertEqual(constraint.fields, ())
+
     def test_eq(self):
         constraint_1 = ExclusionConstraint(
             name="exclude_overlapping",
