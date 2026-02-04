@@ -2,6 +2,7 @@ import functools
 import inspect
 import itertools
 import re
+import reprlib
 import sys
 import types
 import warnings
@@ -10,7 +11,6 @@ from pathlib import Path
 from django.conf import settings
 from django.http import Http404, HttpResponse, HttpResponseNotFound
 from django.template import Context, Engine, TemplateDoesNotExist
-from django.template.defaultfilters import pprint
 from django.urls import URLResolver, resolve
 from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
@@ -58,6 +58,49 @@ class CallableSettingWrapper:
 
     def __repr__(self):
         return repr(self._wrapped)
+
+
+class SafeRepr(reprlib.Repr):
+    """
+    A repr subclass that limits output size to avoid memory issues with large
+    objects when formatting exception debug pages.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # Limit size of containers to prevent memory issues
+        self.maxlist = 100
+        self.maxtuple = 100
+        self.maxset = 100
+        self.maxfrozenset = 100
+        self.maxdeque = 100
+        self.maxarray = 100
+        self.maxdict = 100
+        self.maxstring = 200
+        self.maxother = 200
+
+    def repr_instance(self, obj, level):
+        """
+        Return a representation for any object without a specific repr_* method.
+        If repr() raises an exception, return an error message.
+        """
+        try:
+            s = repr(obj)
+        except Exception as e:
+            return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
+        if len(s) > self.maxother:
+            i = max(0, (self.maxother - 3) // 2)
+            j = max(0, self.maxother - 3 - i)
+            s = s[:i] + self.fillvalue + s[len(s) - j :]
+        return s
+
+
+def safe_repr(value):
+    """
+    Return a safe representation of the given value, limiting output size
+    to avoid memory issues with large objects.
+    """
+    return SafeRepr().repr(value)
 
 
 @csp_override({})
@@ -357,10 +400,7 @@ class ExceptionReporter:
             if "vars" in frame:
                 frame_vars = []
                 for k, v in frame["vars"]:
-                    v = pprint(v)
-                    # Trim large blobs of data
-                    if len(v) > 4096:
-                        v = "%s… <trimmed %d bytes string>" % (v[0:4096], len(v))
+                    v = safe_repr(v)
                     frame_vars.append((k, v))
                 frame["vars"] = frame_vars
             frames[i] = frame

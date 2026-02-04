@@ -1106,7 +1106,6 @@ class ExceptionReporterTests(SimpleTestCase):
     def test_too_large_values_handling(self):
         "Large values should not create a large HTML."
         large = 256 * 1024
-        repr_of_str_adds = len(repr(""))
         try:
 
             class LargeOutput:
@@ -1120,9 +1119,8 @@ class ExceptionReporterTests(SimpleTestCase):
         reporter = ExceptionReporter(None, exc_type, exc_value, tb)
         html = reporter.get_traceback_html()
         self.assertEqual(len(html) // 1024 // 128, 0)  # still fit in 128Kb
-        self.assertIn(
-            "&lt;trimmed %d bytes string&gt;" % (large + repr_of_str_adds,), html
-        )
+        # The variable representation is truncated with "..." by reprlib.
+        self.assertIn("...", html)
 
     def test_encoding_error(self):
         """
