@@ -87,6 +87,50 @@ class ExclusionConstraint(CheckPostgresInstalledMixin, BaseConstraint):
             violation_error_message=violation_error_message,
         )
 
+    @property
+    def fields(self):
+        """
+        Return a tuple of field names if all expressions are simple field
+        references (strings or F() objects referencing a single field).
+        Return an empty tuple if any expression is a complex expression.
+        """
+        field_names = []
+        for expression, _ in self.expressions:
+            if isinstance(expression, str):
+                field_names.append(expression)
+            elif isinstance(expression, F):
+                # Check if it's a simple field reference (no transforms/lookups)
+                if "__" not in expression.name:
+                    field_names.append(expression.name)
+                else:
+                    # F expression with lookups is considered complex
+                    return ()
+            else:
+                # Complex expression, cannot extract field names
+                return ()
+        return tuple(field_names)
+
+    @property
+    def is_totally_unique(self):
+        """
+        Return True if this exclusion constraint functions as a unique
+        constraint. This is the case when:
+        - Using a hash index type
+        - Has exactly one expression
+        - The expression uses the EQUAL operator
+        - There is no condition (applies to all rows)
+
+        Hash exclusion constraints with these properties are semantically
+        equivalent to unique constraints.
+        """
+        return (
+            self.index_type.lower() == "hash"
+            and len(self.expressions) == 1
+            and self.expressions[0][1] == RangeOperators.EQUAL
+            and self.condition is None
+            and len(self.fields) == 1  # Ensure it's a simple field reference
+        )
+
     def _get_expressions(self, schema_editor, query):
         expressions = []
         for idx, (expression, operator) in enumerate(self.expressions):

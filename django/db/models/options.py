@@ -979,15 +979,19 @@ class Options:
         Return a list of total unique constraints. Useful for determining set
         of fields guaranteed to be unique for all rows.
         """
-        return [
-            constraint
-            for constraint in self.constraints
+        constraints = []
+        for constraint in self.constraints:
             if (
                 isinstance(constraint, UniqueConstraint)
                 and constraint.condition is None
                 and not constraint.contains_expressions
-            )
-        ]
+            ):
+                constraints.append(constraint)
+            elif getattr(constraint, "is_totally_unique", False):
+                # Include constraints that are semantically equivalent to unique
+                # constraints, such as PostgreSQL hash exclusion constraints.
+                constraints.append(constraint)
+        return constraints
 
     @cached_property
     def pk_fields(self):

@@ -1369,3 +1369,65 @@ class ExclusionConstraintTests(PostgreSQLTestCase):
                 expressions=[("int1", RangeOperators.NOT_EQUAL)],
                 index_type="hash",
             )
+
+    def test_fields_property_with_string_expressions(self):
+        """fields property returns field names for string expressions."""
+        constraint = ExclusionConstraint(
+            name="test_fields_string",
+            expressions=[("field1", RangeOperators.EQUAL)],
+            index_type="hash",
+        )
+        self.assertEqual(constraint.fields, ("field1",))
+
+    def test_fields_property_with_f_expressions(self):
+        """fields property returns field names for F() expressions."""
+        constraint = ExclusionConstraint(
+            name="test_fields_f",
+            expressions=[(F("field1"), RangeOperators.EQUAL)],
+            index_type="hash",
+        )
+        self.assertEqual(constraint.fields, ("field1",))
+
+    def test_fields_property_with_complex_expressions(self):
+        """fields property returns empty tuple for complex expressions."""
+        constraint = ExclusionConstraint(
+            name="test_fields_complex",
+            expressions=[(Lower("field1"), RangeOperators.EQUAL)],
+        )
+        self.assertEqual(constraint.fields, ())
+
+    def test_is_totally_unique_hash_equal(self):
+        """is_totally_unique returns True for hash exclusion with EQUAL operator."""
+        constraint = ExclusionConstraint(
+            name="test_totally_unique",
+            expressions=[("field1", RangeOperators.EQUAL)],
+            index_type="hash",
+        )
+        self.assertIs(constraint.is_totally_unique, True)
+
+    def test_is_totally_unique_gist_equal(self):
+        """is_totally_unique returns False for GiST exclusion with EQUAL operator."""
+        constraint = ExclusionConstraint(
+            name="test_not_totally_unique_gist",
+            expressions=[("field1", RangeOperators.EQUAL)],
+            index_type="gist",
+        )
+        self.assertIs(constraint.is_totally_unique, False)
+
+    def test_is_totally_unique_with_condition(self):
+        """is_totally_unique returns False when condition is specified."""
+        constraint = ExclusionConstraint(
+            name="test_not_totally_unique_condition",
+            expressions=[("field1", RangeOperators.EQUAL)],
+            index_type="hash",
+            condition=Q(field1__gt=0),
+        )
+        self.assertIs(constraint.is_totally_unique, False)
+
+    def test_is_totally_unique_complex_expression(self):
+        """is_totally_unique returns False for complex expressions."""
+        constraint = ExclusionConstraint(
+            name="test_not_totally_unique_complex",
+            expressions=[(Lower("field1"), RangeOperators.EQUAL)],
+        )
+        self.assertIs(constraint.is_totally_unique, False)
