@@ -1369,3 +1369,127 @@ class ExclusionConstraintTests(PostgreSQLTestCase):
                 expressions=[("int1", RangeOperators.NOT_EQUAL)],
                 index_type="hash",
             )
+
+    def test_fields_property_hash_equality(self):
+        """
+        Hash exclusion constraints with equality operator expose the field
+        via the fields property.
+        """
+        # Hash with equality - should expose field
+        constraint = ExclusionConstraint(
+            name="hash_equal",
+            index_type="hash",
+            expressions=[("number", RangeOperators.EQUAL)],
+        )
+        self.assertEqual(constraint.fields, ("number",))
+
+        # Hash with equality using F object
+        constraint = ExclusionConstraint(
+            name="hash_equal_f",
+            index_type="hash",
+            expressions=[(F("number"), RangeOperators.EQUAL)],
+        )
+        self.assertEqual(constraint.fields, ("number",))
+
+    def test_fields_property_non_hash(self):
+        """
+        Non-hash exclusion constraints do not expose fields.
+        """
+        # GiST (default) - should not expose field
+        constraint = ExclusionConstraint(
+            name="gist_overlaps",
+            expressions=[("datespan", RangeOperators.OVERLAPS)],
+        )
+        self.assertEqual(constraint.fields, ())
+
+        # SPGiST - should not expose field
+        constraint = ExclusionConstraint(
+            name="spgist_overlaps",
+            index_type="spgist",
+            expressions=[("datespan", RangeOperators.OVERLAPS)],
+        )
+        self.assertEqual(constraint.fields, ())
+
+    def test_fields_property_with_condition(self):
+        """
+        Hash exclusion constraints with condition do not expose fields
+        since they don't guarantee total uniqueness.
+        """
+        constraint = ExclusionConstraint(
+            name="hash_equal_conditional",
+            index_type="hash",
+            expressions=[("number", RangeOperators.EQUAL)],
+            condition=Q(number__gt=0),
+        )
+        self.assertEqual(constraint.fields, ())
+
+    @isolate_apps("postgres_tests")
+    def test_total_unique_constraints_includes_hash_exclusion(self):
+        """
+        Hash exclusion constraints with equality operator are included in
+        total_unique_constraints.
+        """
+
+        class ModelWithHashExclusion(Model):
+            number = IntegerField()
+
+            class Meta:
+                app_label = "postgres_tests"
+                constraints = [
+                    ExclusionConstraint(
+                        name="hash_unique",
+                        index_type="hash",
+                        expressions=[("number", RangeOperators.EQUAL)],
+                    )
+                ]
+
+        constraints = ModelWithHashExclusion._meta.total_unique_constraints
+        self.assertEqual(len(constraints), 1)
+        self.assertEqual(constraints[0].name, "hash_unique")
+        self.assertEqual(constraints[0].fields, ("number",))
+
+    @isolate_apps("postgres_tests")
+    def test_total_unique_constraints_excludes_conditional_hash(self):
+        """
+        Hash exclusion constraints with condition are not included in
+        total_unique_constraints.
+        """
+
+        class ModelWithConditionalHashExclusion(Model):
+            number = IntegerField()
+
+            class Meta:
+                app_label = "postgres_tests"
+                constraints = [
+                    ExclusionConstraint(
+                        name="hash_unique_conditional",
+                        index_type="hash",
+                        expressions=[("number", RangeOperators.EQUAL)],
+                        condition=Q(number__gt=0),
+                    )
+                ]
+
+        constraints = ModelWithConditionalHashExclusion._meta.total_unique_constraints
+        self.assertEqual(len(constraints), 0)
+
+    @isolate_apps("postgres_tests")
+    def test_total_unique_constraints_excludes_gist(self):
+        """
+        GiST exclusion constraints (non-hash) are not included in
+        total_unique_constraints.
+        """
+
+        class ModelWithGistExclusion(Model):
+            ints = IntegerRangeField()
+
+            class Meta:
+                app_label = "postgres_tests"
+                constraints = [
+                    ExclusionConstraint(
+                        name="gist_overlaps",
+                        expressions=[("ints", RangeOperators.ADJACENT_TO)],
+                    )
+                ]
+
+        constraints = ModelWithGistExclusion._meta.total_unique_constraints
+        self.assertEqual(len(constraints), 0)

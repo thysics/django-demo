@@ -87,6 +87,27 @@ class ExclusionConstraint(CheckPostgresInstalledMixin, BaseConstraint):
             violation_error_message=violation_error_message,
         )
 
+    @property
+    def fields(self):
+        """
+        Return a tuple of field names if this constraint guarantees uniqueness
+        (i.e., it's a hash exclusion constraint with equality operator and no
+        condition). Otherwise, return an empty tuple.
+        """
+        if (
+            self.index_type.lower() == "hash"
+            and self.condition is None
+            and len(self.expressions) == 1
+            and self.expressions[0][1] == RangeOperators.EQUAL
+        ):
+            expr = self.expressions[0][0]
+            if isinstance(expr, str):
+                return (expr,)
+            elif isinstance(expr, F):
+                # F object referencing a field name
+                return (expr.name,)
+        return ()
+
     def _get_expressions(self, schema_editor, query):
         expressions = []
         for idx, (expression, operator) in enumerate(self.expressions):
