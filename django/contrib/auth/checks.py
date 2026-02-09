@@ -8,6 +8,54 @@ from django.utils.module_loading import import_string
 from .management import _get_builtin_permissions
 
 
+def _is_totally_unique_hash_exclusion_constraint(constraint, field_name):
+    """
+    Return True if the constraint is a hash exclusion constraint that provides
+    total uniqueness for the given field.
+
+    A hash exclusion constraint with a single field and the EQUAL operator
+    functions equivalently to a unique constraint.
+    """
+    try:
+        from django.contrib.postgres.constraints import ExclusionConstraint
+        from django.contrib.postgres.fields import RangeOperators
+    except ImportError:
+        return False
+
+    if not isinstance(constraint, ExclusionConstraint):
+        return False
+
+    # Must be a hash index to function like a unique constraint.
+    if constraint.index_type.lower() != "hash":
+        return False
+
+    # Must have no condition to be totally unique.
+    if constraint.condition is not None:
+        return False
+
+    # Hash exclusion constraints must have exactly one expression.
+    if len(constraint.expressions) != 1:
+        return False
+
+    expression, operator = constraint.expressions[0]
+
+    # Operator must be EQUAL.
+    if operator != RangeOperators.EQUAL:
+        return False
+
+    # Expression must be a simple field reference matching the target field.
+    if isinstance(expression, str):
+        return expression == field_name
+    else:
+        # Handle F() expressions
+        from django.db.models import F
+
+        if isinstance(expression, F):
+            return expression.name == field_name
+
+    return False
+
+
 def _subclass_index(class_path, candidate_paths):
     """
     Return the index of dotted class path (or a subclass of that class) in a
@@ -68,10 +116,18 @@ def check_user_model(app_configs, **kwargs):
         )
 
     # Check that the username field is unique
-    if not cls._meta.get_field(cls.USERNAME_FIELD).unique and not any(
-        constraint.fields == (cls.USERNAME_FIELD,)
-        for constraint in cls._meta.total_unique_constraints
-    ):
+    has_unique_constraint = (
+        cls._meta.get_field(cls.USERNAME_FIELD).unique
+        or any(
+            constraint.fields == (cls.USERNAME_FIELD,)
+            for constraint in cls._meta.total_unique_constraints
+        )
+        or any(
+            _is_totally_unique_hash_exclusion_constraint(constraint, cls.USERNAME_FIELD)
+            for constraint in cls._meta.constraints
+        )
+    )
+    if not has_unique_constraint:
         if settings.AUTHENTICATION_BACKENDS == [
             "django.contrib.auth.backends.ModelBackend"
         ]:
