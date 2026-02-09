@@ -8,6 +8,32 @@ from django.utils.module_loading import import_string
 from .management import _get_builtin_permissions
 
 
+def _check_hash_exclusion_constraint_uniqueness(cls, field_name):
+    """
+    Check if the field is covered by a hash exclusion constraint that
+    guarantees uniqueness. A hash exclusion constraint with a single field
+    using the EQUAL operator provides the same uniqueness guarantee as a
+    unique constraint.
+    """
+    try:
+        from django.contrib.postgres.constraints import ExclusionConstraint
+        from django.contrib.postgres.fields import RangeOperators
+    except ImportError:
+        return False
+
+    for constraint in cls._meta.constraints:
+        if (
+            isinstance(constraint, ExclusionConstraint)
+            and constraint.index_type.lower() == "hash"
+            and constraint.condition is None
+            and len(constraint.expressions) == 1
+        ):
+            expression, operator = constraint.expressions[0]
+            if expression == field_name and operator == RangeOperators.EQUAL:
+                return True
+    return False
+
+
 def _subclass_index(class_path, candidate_paths):
     """
     Return the index of dotted class path (or a subclass of that class) in a
@@ -68,9 +94,13 @@ def check_user_model(app_configs, **kwargs):
         )
 
     # Check that the username field is unique
-    if not cls._meta.get_field(cls.USERNAME_FIELD).unique and not any(
-        constraint.fields == (cls.USERNAME_FIELD,)
-        for constraint in cls._meta.total_unique_constraints
+    if (
+        not cls._meta.get_field(cls.USERNAME_FIELD).unique
+        and not any(
+            constraint.fields == (cls.USERNAME_FIELD,)
+            for constraint in cls._meta.total_unique_constraints
+        )
+        and not _check_hash_exclusion_constraint_uniqueness(cls, cls.USERNAME_FIELD)
     ):
         if settings.AUTHENTICATION_BACKENDS == [
             "django.contrib.auth.backends.ModelBackend"
